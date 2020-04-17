@@ -1,8 +1,7 @@
-# Copyright 2019 actsnclass software
+# Copyright 2020 resspect software
 # Author: Emille E. O. Ishida
-#         Based on initial prototype developed by the CRP #4 team
-#
-# created on 8 August 2019
+#      
+# created on 14 April 2020
 #
 # Licensed GNU General Public License v3.0;
 # you may not use this file except in compliance with the License.
@@ -25,6 +24,7 @@ from .learn_loop import *
 from .metrics import *
 from .query_strategies import *
 from .plot_results import *
+from .snana_fits_to_pd import *
 from .scripts.build_canonical import main as build_canonical
 from .scripts.build_time_domain import main as build_time_domain
 from .scripts.fit_dataset import main as fit_dataset
@@ -62,6 +62,7 @@ __all__ = ['accuracy',
            'purity',
            'random_forest',           
            'random_sampling',
+           'read_fits',
            'run_loop',
            'run_time_domain',
            'SNPCCPhotometry',

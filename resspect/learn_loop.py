@@ -1,6 +1,5 @@
-# Copyright 2019 snactclass software
-# Author: Emille E. O. Ishida
-#         Based on initial prototype developed by the CRP #4 team
+# Copyright 2020 resspect software
+# Author: The RESSPECT team
 #
 # created on 10 August 2019
 #
@@ -18,7 +17,7 @@
 
 __all__ = ['learn_loop']
 
-from actsnclass import DataBase
+from resspect import DataBase
 
 
 def learn_loop(nloops: int, strategy: str, path_to_features: str,
