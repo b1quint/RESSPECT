@@ -61,6 +61,8 @@ class DataBase:
         Complete information of queried objects.
     queryable_ids: np.array
         Flag for objects available to be queried.
+    telescope_names: list
+        Name of telescopes for which costs are given.
     test_features: np.array
         Features matrix for the test sample.
     test_metadata: pd.DataFrame
@@ -181,6 +183,7 @@ class DataBase:
         self.predicted_class = np.array([])
         self.queried_sample = []
         self.queryable_ids = np.array([])
+        self.telescope_names = ['4m', '8m']
         self.test_features = np.array([])
         self.test_metadata = pd.DataFrame()
         self.test_labels = np.array([])
@@ -240,8 +243,13 @@ class DataBase:
                                    'it0', 'itfall', 'itrise', 'zA', 'zB', 'zt0',
                                    'ztfall', 'ztrise']
 
+            
             self.metadata_names = ['id', 'redshift', 'type', 'code',
                                    'orig_sample', 'queryable']
+
+            for name in self.telescope_names:
+                if name in data.keys():
+                    self.metadata_names = self.metadata_names + ['cost_' + name]
 
         elif survey == 'LSST':
             self.features_names = ['uA', 'uB', 'ut0', 'utfall', 'utrise',
@@ -259,7 +267,8 @@ class DataBase:
                                        'orig_sample', 'queryable']
 
         else:
-            raise ValueError('Only "DES" and "LSST" filters are implemented at this point!')
+            raise ValueError('Only "DES" and "LSST" filters are ' + \
+                             'implemented at this point!')
 
         if sample == None:
             self.features = data[self.features_names]
@@ -282,7 +291,8 @@ class DataBase:
             self.train_metadata = data[self.metadata_names]
 
             if screen:
-                print('Loaded ', self.train_metadata.shape[0], ' ' +  sample + ' samples!')
+                print('Loaded ', self.train_metadata.shape[0], 
+                      ' ' +  sample + ' samples!')
 
         elif sample == 'test':
             self.test_features = data[self.features_names].values
@@ -473,9 +483,10 @@ class DataBase:
             Default is False.
         screen: bool (optional)
             If True display the dimensions of training and test samples.
+            Default is False.
         sep_files: bool (optional)
             If True, consider train and test samples separately read
-            from independent files.
+            from independent files. Default is False.
         """
 
         # object if keyword
