@@ -262,6 +262,9 @@ class DataBase:
                                        'orig_sample']
 
             for name in self.telescope_names:
+
+                print('name', name)
+                print(data.keys())
                 if name in data.keys():
                     self.metadata_names = self.metadata_names + ['cost_' + name]
 
