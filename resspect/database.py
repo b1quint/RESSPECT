@@ -254,9 +254,12 @@ class DataBase:
                                    'it0', 'itfall', 'itrise', 'zA', 'zB', 'zt0',
                                    'ztfall', 'ztrise']
 
-            
-            self.metadata_names = ['id', 'redshift', 'type', 'code',
-                                   'orig_sample', 'queryable']
+            if 'queryable' in data.keys():
+                self.metadata_names = ['id', 'redshift', 'type', 'code',
+                                       'orig_sample', 'queryable']
+            else:
+                self.metadata_names = ['id', 'redshift', 'type', 'code',
+                                       'orig_sample']
 
             for name in self.telescope_names:
                 if name in data.keys():
@@ -270,12 +273,18 @@ class DataBase:
                                    'zA', 'zB', 'zt0', 'ztfall', 'ztrise',
                                    'YA', 'YB', 'Yt0', 'Ytfall', 'Ytrise']
 
-            if 'objid' in data.keys():
+            if 'objid' in data.keys() and 'queryable' in data.keys():
                 self.metadata_names = ['objid', 'redshift', 'type', 'code',
                                        'orig_sample', 'queryable']
-            elif 'id' in data.keys():
+            elif 'objid' in data.keys() and 'queryable' not in data.keys():
+                    self.metadata_names = ['objid', 'redshift', 'type', 'code',
+                                           'orig_sample']
+            elif 'id' in data.keys() and 'queryable' in data.keys():
                 self.metadata_names = ['id', 'redshift', 'type', 'code',
                                        'orig_sample', 'queryable']
+            elif 'id' in data.keys() and 'queryable' not in data.keys():
+                self.metadata_names = ['id', 'redshift', 'type', 'code',
+                                       'orig_sample']
 
         else:
             raise ValueError('Only "DES" and "LSST" filters are ' + \
@@ -290,12 +299,16 @@ class DataBase:
 
                 ntrain = sum(self.metadata['orig_sample'] == 'train')
                 ntest = sum(self.metadata['orig_sample'] == 'test')
-                nquery = sum(self.metadata['queryable'])
+
+                if 'queryable' in data.keys():
+                    nquery = sum(self.metadata['queryable'])
 
                 print('   ... of which')
                 print('       original train: ', ntrain)
                 print('       original test: ', ntest)
-                print('       query: ', nquery)
+                
+                if 'queryable'  in data.keys():
+                    print('       query: ', nquery)
 
         elif sample == 'train':
             self.train_features = data[self.features_names].values
