@@ -262,7 +262,7 @@ class DataBase:
                                        'orig_sample']
 
             for name in self.telescope_names:
-                if 'cost_'name in data.keys():
+                if 'cost_' + name in data.keys():
                     self.metadata_names = self.metadata_names + ['cost_' + name]
 
         elif survey == 'LSST':
