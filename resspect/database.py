@@ -666,7 +666,7 @@ class DataBase:
             all_not_train_ids = data_copy[id_name].values[~train_flag]
 
             # number of objects in test and validation
-            n = frac_val_pool * len(all_not_train_ids))
+            n = frac_val_pool * len(all_not_train_ids)
 
             # select the non-train ids, via their indexes
             indx = np.random.choice(np.arange(0, len(all_not_train_ids)), 
