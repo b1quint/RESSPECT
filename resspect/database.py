@@ -55,6 +55,16 @@ class DataBase:
         Metadata for photometrically classified object ids.
     plasticc_mjd_lim: list
         [min, max] mjds for plasticc data
+    pool_class: np.array
+        Estimated classes for the pool sample.
+    pool_features: np.array
+        Features matrix for the pool sample. 
+    pool_labels: np.array
+        True classes for the pool sample.
+    pool_metadata: pd.DataFrame
+        Metadata for the pool sample.
+    pool_prob: np.array
+        Estimated probabilities for pool sample.
     predicted_class: np.array
         Predicted classes - results from ML classifier.
     queried_sample: list
@@ -180,6 +190,11 @@ class DataBase:
         self.metadata_names = []
         self.metrics_list_names = []
         self.metrics_list_values = []
+        self.pool_class = None
+        self.pool_features = np.array([])
+        self.pool_metadata = pd.DataFrame([])
+        self.pool_labels = None
+        self.pool_prob = None
         self.predicted_class = np.array([])
         self.queried_sample = []
         self.queryable_ids = np.array([])
@@ -191,9 +206,9 @@ class DataBase:
         self.train_metadata = pd.DataFrame()
         self.train_labels = np.array([])
         self.validation_class = None
-        self.validation_features = None
+        self.validation_features = np.array([])
         self.validation_labels = None
-        self.validation_metadata = None
+        self.validation_metadata = pd.DataFrame([])
         self.validation_prob = None
 
     def load_bazin_features(self, path_to_bazin_file: str, screen=False,
@@ -231,10 +246,6 @@ class DataBase:
             data = pd.read_csv(path_to_bazin_file, index_col=False)
             if ' ' in data.keys()[0]:
                 data = pd.read_csv(path_to_bazin_file, sep=' ', index_col=False)
-
-        # check if queryable is there
-        if 'queryable' not in data.keys():
-            data['queryable'] = [True for i in range(data.shape[0])]
 
         # list of features to use
         if survey == 'DES':
@@ -299,7 +310,24 @@ class DataBase:
             self.test_metadata = data[self.metadata_names]
 
             if screen:
-                print('Loaded ', self.test_metadata.shape[0], ' ' + sample +  ' samples!')
+                print('Loaded ', self.test_metadata.shape[0], ' ' + \
+                       sample +  ' samples!')
+
+        elif sample == 'validation':
+            self.validation_features = data[self.features_names].values
+            self.validation_metadata = data[self.metadata_names]
+
+            if screen:
+                print('Loaded ', self.validation_metadata.shape[0], ' ' + \
+                       sample +  ' samples!')
+
+        elif sample == 'pool':
+            self.pool_features = data[self.features_names].values
+            self.pool_metadata = data[self.metadata_names]
+
+            if screen:
+                print('Loaded ', self.pool_metadata.shape[0], ' ' + \
+                       sample +  ' samples!')
 
 
     def load_photometry_features(self, path_to_photometry_file: str,
@@ -408,7 +436,9 @@ class DataBase:
                              '\n Feel free to add other options.')
 
     def load_plasticc_mjd(self, path_to_data_dir):
-        """Return all MJDs from 1 file from PLAsTiCC simulations.
+        """Return min and max mjds for 1 file from PLAsTiCC simulations.
+
+        Populates attribute plasticc_mjd_lim.
 
         Parameters
         ----------
@@ -500,16 +530,38 @@ class DataBase:
             test_labels = self.test_metadata['type'].values == 'Ia'
             self.test_labels = test_labels.astype(int)
 
+            if self.validation_metadata is not None:
+                validation_labels = self.validation_metadata['type'] == 'Ia'
+                self.validation_labels = validation_labels.astype(int)
+
+            if self.pool_metadata is not None:
+                pool_labels = self.pool_metadata['type'] = 'Ia'
+                self.pool_labels = pool_labels.astype(int)
+
             # identify queryable objects
             if 'queryable' in self.test_metadata['orig_sample'].values:
                 queryable_flag = self.test_metadata['orig_sample'] == 'queryable'
-                self.queryable_ids = self.test_metadata[queryable_flag][id_name].values
+                self.queryable_ids = \
+                       self.test_metadata[queryable_flag][id_name].values
+
+            elif self.pool_metadata.shape[0] == 0:
+                queryable_flag = self.test_metadata['queryable'] == True
+                self.queryable_ids = \
+                        self.test_metadata[queryable_flag][id_name].values
+
+            elif self.pool_metadata.shape[0] > 0:
+                queryable_flag = self.pool_metadata['queryable'] == True
+                self.queryable_ids = \
+                     self.pool_metadata[queryable_flag][id_name].values
 
             else:
                 self.queryable_ids = self.test_metadata[id_name].values
 
             # build complete metadata object
-            self.metadata = pd.concat([self.train_metadata, self.test_metadata])
+            self.metadata = pd.concat([self.train_metadata, 
+                                       self.test_metadata,
+                                       self.validation_metadata,
+                                       self.pool_metadata])
 
         else:
             train_flag = self.metadata['orig_sample'] == 'train'
@@ -541,7 +593,7 @@ class DataBase:
 
     def build_random_training(self, initial_training: int, nclass=2, screen=False,
                               Ia_frac=0.5, queryable=True, sep_files=False,
-                              sep_validation=False):
+                              sep_val_pool=False, frac_val_pool=0.1):
         """Construct initial random training and corresponding test sample.
 
         Populate properties: train_features, train_header, test_features,
@@ -567,8 +619,11 @@ class DataBase:
         sep_files: bool (optional)
             If True, consider train and test samples separately read
             from independent files.
-        sep_validation: bool (optional)
-            Separate validation sample. Default is False.
+        sep_val_pool: bool (optional)
+            Separate validation and pool sample. Default is False.
+        frac_val_pool: float \in [0,1] (optional)
+            Franction of data to assigned to each: validation and pool 
+            samples. Default is 0.1.
         """
 
         # object if keyword
@@ -576,8 +631,14 @@ class DataBase:
 
         if sep_files:
             # build complete metadata object
-            self.metadata = pd.concat([self.train_metadata, self.test_metadata])
-            self.features = np.concatenate((self.train_features, self.test_features))
+            self.metadata = pd.concat([self.train_metadata, 
+                                       self.test_metadata,
+                                       self.validation_metadata,
+                                       self.pool_metadata])
+            self.features = np.concatenate((self.train_features, 
+                                            self.test_features,
+                                            self.validation_features,
+                                            self.pool_features))
 
         # identify Ia
         data_copy = self.metadata.copy()
@@ -600,19 +661,32 @@ class DataBase:
         self.train_metadata = data_copy[train_flag]
         self.train_features = self.features[train_flag].values
 
-        if sep_validation:
+        if sep_val_pool:
             # get all ids which are not in training 
             all_not_train_ids = data_copy[id_name].values[~train_flag]
 
-            # select 25% of the non-train ids, via their indexes
-            indx = np.random.randint(low=0, high=len(all_not_train_ids), size=int(0.25 * len(all_not_train_ids)))
-            validation_flag = np.array([obj in all_not_train_ids[indx] for obj in data_copy[id_name].values])
-            test_flag = np.logical_and(~train_flag, ~validation_flag)
+            # number of objects in test and validation
+            n = frac_val_pool * len(all_not_train_ids))
+
+            # select the non-train ids, via their indexes
+            indx = np.random.choice(np.arange(0, len(all_not_train_ids)), 
+                                    size=int(2 * n), replace=False)
+
+            validation_flag = np.array([obj in all_not_train_ids[indx[:n]] 
+                                        for obj in data_copy[id_name].values])
+
+            test_flag = np.array([obj in all_not_train_ids[indx[n:]] 
+                                        for obj in data_copy[id_name].values])
+
+            tv_flag = np.logical_and(~train_flag, ~validation_flag)
+            pool_flag = np.logical_and(tv_flag, ~test_flag)
               
             self.validation_metadata = data_copy[validation_flag]
             self.validation_features = self.features[validation_flag].values
             self.test_metadata = data_copy[test_flag]
             self.test_features = self.features[test_flag].values
+            self.pool_metadata = data_copy[pool_flag]
+            self.pool_features = self.features[pool_flag].values
  
         else:
             # get test sample
@@ -624,19 +698,23 @@ class DataBase:
             self.train_labels = data_copy['type'][train_flag].values == 'Ia'
             self.test_labels = data_copy['type'][test_flag].values == 'Ia'
           
-            if sep_validation:
-                self.validation_labels = data_copy['type'][validation_flag].values == 'Ia'
+            if sep_val_pool:
+                val_labels = data_copy['type'][validation_flag].values == 'Ia'
+                self.validation_labels = val_labels.astype(int)
+
+                pool_labels = data_copy['type'][pool_flag].values == 'Ia'
+                self.pool_labels = pool_labels.astype(int)
         else:
             raise ValueError("Only 'Ia x non-Ia' are implemented! "
                              "\n Feel free to add other options.")
 
-        if queryable and not sep_validation:
+        if queryable and not sep_val_pool:
             queryable_flag = data_copy['queryable'].values
             combined_flag = np.logical_and(~train_flag, queryable_flag)
             self.queryable_ids = data_copy[combined_flag][id_name].values
 
-        elif sep_validation:
-            self.queryable_ids = data_copy[test_flag][id_name].values
+        elif queryable and sep_val_pool:
+            self.queryable_ids = data_copy[pool_flag][id_name].values
         else:
             self.queryable_ids = self.test_metadata[id_name].values
 
@@ -736,7 +814,8 @@ class DataBase:
                       screen=False, Ia_frac=0.5,
                       queryable=False, save_samples=False, sep_files=False,
                       survey='DES', output_fname=' ', path_to_train=' ',
-                      path_to_queried=' ', method='Bazin', sep_validation=False):
+                      path_to_queried=' ', method='Bazin', sep_val_pool=False,
+                      frac_val_pool=0.1):
         """Separate train, test and validation samples.
 
         Populate properties: train_features, train_header, test_features,
@@ -751,6 +830,9 @@ class DataBase:
             elif 'previous': continue from a previously run loop
             elif int: choose the required number of samples at random,
             ensuring that at least half are SN Ia.
+        frac_val_pool: float \in [0,1] (optional)
+            Fraction of data to be assigned to each: validation and pool sample. 
+            Only used if sep_val_pool == True. Default is 0.1.
         Ia_frac: float in [0,1] (optional)
             Fraction of Ia required in initial training sample.
             Default is 0.5.
@@ -785,8 +867,9 @@ class DataBase:
         sep_files: bool (optional)
             If True, consider train and test samples separately read
             from independent files. Default is False.
-        sep_validation: bool (optional)
-            If True, construt separated validation sample. Default is False.
+        sep_val_pool: bool (optional)
+            If True, construt separated validation and pool samples. 
+            Default is False.
         """
 
         if initial_training == 'original':
@@ -803,13 +886,17 @@ class DataBase:
                                        nclass=nclass, screen=screen,
                                        Ia_frac=Ia_frac, queryable=queryable,
                                        sep_files=sep_files, 
-                                       sep_validation=sep_validation)
+                                       sep_val_pool=sep_val_pool,
+                                       frac_val_pool=frac_val_pool)
 
         if screen:
             print('Training set size: ', self.train_metadata.shape[0])
             print('Test set size: ', self.test_metadata.shape[0])
-            print('Validation set size: ', self.validation_metadata.shape[0])
             print('Queryable set size: ', sum(self.metadata['queryable']))
+
+            if sep_val_pool:
+                print('Validation set size: ', self.validation_metadata.shape[0])
+                print('Pool set size: ', self.pool_metadata.shape[0])
 
         if save_samples:
 
@@ -848,7 +935,7 @@ class DataBase:
             Parameters required by the chosen classifier.
         """
 
-        if method == 'RandomForest' and str(self.validation_features) != 'None':
+        if method == 'RandomForest' and self.validation_features.shape[0] > 0:
             self.predicted_class,  self.classprob, \
              self.val_class, self.val_prob = \
                    random_forest(self.train_features, self.train_labels,
@@ -1144,7 +1231,8 @@ class DataBase:
         else:
             raise ValueError('Invalid strategy.')
 
-    def update_samples(self, query_indx: list, loop: int, epoch=0):
+    def update_samples(self, query_indx: list, loop: int, epoch=0,
+                       sep_pool_val=False):
         """Add the queried obj(s) to training and remove them from test.
 
         Update properties: train_headers, train_features, train_labels,
@@ -1156,6 +1244,9 @@ class DataBase:
             List of indexes identifying objects to be moved.
         loop: int
             Store number of loop when this query was made.
+        sep_pool_val: bool (optional)
+            If True, consider separate validation and pool sets.
+            Default is False.
         """
 
         if 'id' in self.train_metadata.keys():
@@ -1165,7 +1256,13 @@ class DataBase:
 
         all_queries = []
 
-        while len(query_indx) > 0 and self.test_metadata.shape[0] > 0:
+
+        if sep_val_pool:
+            size = self.pool_metadata.shape[0]
+        else:
+            size = self.test_metadata.shape[0]
+
+        while len(query_indx) > 0 and size > 0:
 
             # identify queried object index
             obj = query_indx[0]
