@@ -35,8 +35,6 @@ class DataBase:
 
     Attributes
     ----------
-    classprob: np.array
-        Classification probability for all objects, [pIa, pnon-Ia].
     data: pd.DataFrame
         Complete information read from features files.
     features: pd.DataFrame
@@ -65,8 +63,6 @@ class DataBase:
         Metadata for the pool sample.
     pool_prob: np.array
         Estimated probabilities for pool sample.
-    predicted_class: np.array
-        Predicted classes - results from ML classifier.
     queried_sample: list
         Complete information of queried objects.
     queryable_ids: np.array
@@ -108,8 +104,6 @@ class DataBase:
         Separate train and test samples.
     classify(method: str)
         Apply a machine learning classifier.
-    classify_bootstrap(method: str)
-        Apply a machine learning classifier bootstrapping the classifier
     evaluate_classification(metric_label: str)
         Evaluate results from classification.
     identify_keywords()
@@ -181,7 +175,6 @@ class DataBase:
     """
 
     def __init__(self):
-        self.classprob = np.array([])
         self.data = pd.DataFrame()
         self.ensemble_probs = None
         self.features = pd.DataFrame([])
@@ -195,7 +188,6 @@ class DataBase:
         self.pool_metadata = pd.DataFrame([])
         self.pool_labels = None
         self.pool_prob = None
-        self.predicted_class = np.array([])
         self.queried_sample = []
         self.queryable_ids = np.array([])
         self.telescope_names = ['4m', '8m']
@@ -513,11 +505,16 @@ class DataBase:
         """Construct train and test samples as given in the original data set.
 
         Populate properties: train_features, train_header, test_features,
-        test_header, queryable_ids (if flag available), train_labels and
-        test_labels.
+        test_header, validation_features, validation_header, 
+        pool_features, pool_header, queryable_ids (if flag available), 
+        train_labels and test_labels.
 
         Parameters
         ----------
+        frac_val_test: float (optional)
+            Fraction of data to be use for each: test and validation.
+            Only used if 'sep_val_test == True' and 'sep_files == False'.
+            Default is 0.1.
         nclass: int (optional)
             Number of classes to consider in the classification
             Currently only nclass == 2 is implemented.
@@ -527,9 +524,6 @@ class DataBase:
         screen: bool (optional)
             If True display the dimensions of training and test samples.
             Default is False.
-        sep_files: bool (optional)
-            If True, consider train and test samples separately read
-            from independent files. Default is False.
         """
 
         # object if keyword
@@ -543,11 +537,11 @@ class DataBase:
             test_labels = self.test_metadata['type'].values == 'Ia'
             self.test_labels = test_labels.astype(int)
 
-            if self.validation_metadata is not None:
+            if sep_val_test:
                 validation_labels = self.validation_metadata['type'] == 'Ia'
                 self.validation_labels = validation_labels.astype(int)
 
-            if self.pool_metadata is not None:
+            if sep_val_test:
                 pool_labels = self.pool_metadata['type'] = 'Ia'
                 self.pool_labels = pool_labels.astype(int)
 
@@ -583,23 +577,31 @@ class DataBase:
             self.train_metadata = self.metadata[train_flag]
 
             test_flag = self.metadata['orig_sample'] == 'test'
-
             test_data = self.features[test_flag]
+                
             self.test_features = test_data.values
             self.test_metadata = self.metadata[test_flag]
 
+            if 'validation' in self.metadata['orig_sample'].values:
+                val_flag = self.metadata['orig_sample'].values == 'validation'
+
+                self.validation_metadata = self.metadata[val_flag]
+                self.validation_features = self.features[val_flag]
+
             if queryable:
-                queryable_flag = self.test_metadata['queryable'].values
-                self.queryable_ids = self.test_metadata[queryable_flag][id_name].values
+                queryable_flag = self.metadata['queryable'].values
+                self.pool_metadata = self.metadata[queryable_flag]
+                self.pool_features = self.features[queryable_flag]
+                self.queryable_ids = self.metadata[queryable_flag][id_name].values
             else:
                 self.queryable_ids = self.test_metadata[id_name].values
 
             if nclass == 2:
                 train_ia_flag = self.train_metadata['type'] == 'Ia'
-                self.train_labels = np.array([int(item) for item in train_ia_flag])
+                self.train_labels = train_ia_flag.astype(int)
 
                 test_ia_flag = self.test_metadata['type'] == 'Ia'
-                self.test_labels = np.array([int(item) for item in test_ia_flag])
+                self.test_labels = test_ia_flag.astype(int)
             else:
                 raise ValueError("Only 'Ia x non-Ia' are implemented! "
                                  "\n Feel free to add other options.")
@@ -928,163 +930,85 @@ class DataBase:
             wsample.close()
 
     def classify(self, method: str, save_predictions=False, pred_dir=None,
-                 loop=None,  **kwargs):
+                 loop=None, get_results_test=False, classify_bootstrap=False,
+                 **kwargs):
         """Apply a machine learning classifier.
 
-        Populate properties: predicted_class and class_prob
+        Populate properties: pool_class, pool_prob, classifier,
+        validation_class, validation_prob
 
         Parameters
         ----------
         method: str
-            Chosen classifier.
-            The current implementation accepts `RandomForest`,
-            'GradientBoostedTrees', 'KNN', 'MLP', 'SVM' and 'NB'.
+            Classifier. Options are: 'RandomForest', 
+            'GradientBoostedTrees', 'KNearestNeighbor', 
+            'MultiLayerPerceptron', 'SupportVectorMachine'
+            or 'NaiveBayes'.
         save_predictions: bool (optional)
             Save predictions to file. Default is False.
         pred_dir: str (optional)
             Output directory to store class predictions.
             Only used if `save_predictions == True`. Default is None.
+        get_results_test: bool (optional)
+            If True, perform classification also in the test sample.
+            Default is False.
+        classify_bootstrap: bool (optional)
+            If True, bootstrap the classifier. Default is False.
         kwargs: extra parameters
             Parameters required by the chosen classifier.
         """
-
-        if method == 'RandomForest' and self.validation_features.shape[0] > 0:
-            self.predicted_class,  self.classprob, \
-             self.val_class, self.val_prob = \
-                   random_forest(self.train_features, self.train_labels,
-                                  self.test_features, self.validation_features,
-                                  **kwargs)
-        elif method == 'RandomForest':
-            self.predicted_class,  self.classprob = \
-                    random_forest(self.train_features, self.train_labels,
-                                  self.test_features, self.validation_features,
-                                  **kwargs)
-
-        elif method == 'GradientBoostedTrees':
-            self.predicted_class,  self.classprob = \
-                gradient_boosted_trees(self.train_features, self.train_labels,
-                                       self.test_features, **kwargs)
-        elif method == 'KNN':
-            self.predicted_class,  self.classprob = \
-                knn(self.train_features, self.train_labels,
-                               self.test_features, **kwargs)
-        elif method == 'MLP':
-            self.predicted_class,  self.classprob = \
-                mlp(self.train_features, self.train_labels,
-                               self.test_features, **kwargs)
-        elif method == 'SVM':
-            self.predicted_class, self.classprob = \
-                svm(self.train_features, self.train_labels,
-                               self.test_features, **kwargs)
-        elif method == 'NB':
-            self.predicted_class, self.classprob = \
-                nbg(self.train_features, self.train_labels,
-                          self.test_features, **kwargs)
-
-
-        else:
-            raise ValueError("The only classifiers implemented are" +
-                              "'RandomForest', 'GradientBoostedTrees'," +
-                              "'KNN', 'MLP' and NB'." +
-                             "\n Feel free to add other options.")
-
-        if save_predictions and str(self.validation_features) == 'None':
-            id_name = self.identify_keywords()
-
-            out_fname = 'predict_loop_' + str(loop) + '.dat'
-            op = open(pred_dir + '/' + out_fname, 'w')
-            op.write(id_name + ',' + 'prob_nIa, prob_Ia,pred_class\n')
-            for i in range(self.test_metadata.shape[0]):
-                op.write(str(self.test_metadata[id_name].iloc[i]) + ',')
-                op.write(str(self.classprob[i][0]) + ',' + str(self.classprob[i][1]) + ',')
-                op.write(str(self.predicted_class[i]) + '\n')
-            op.close()
-
-        elif save_predictions:
-            id_name = self.identify_keywords()
-
-            out_fname = 'predict_loop_' + str(loop) + '.dat'
-            op = open(pred_dir + '/' + out_fname, 'w')
-            op.write(id_name + ',' + 'prob_nIa, prob_Ia,pred_class\n')
-            for i in range(self.validation_metadata.shape[0]):
-                op.write(str(self.validation_metadata[id_name].iloc[i]) + ',')
-                op.write(str(self.val_prob[i][0]) + ',' + str(self.val_prob[i][1]) + ',')
-                op.write(str(self.val_class[i]) + '\n')
-            op.close()
-                                                                                                                                        
-                
-
-    def classify_bootstrap(self, method: str, save_predictions=False, pred_dir=None,
-                           loop=None,**kwargs):
-        """Apply a machine learning classifier bootstrapping the classifier.
-
-        Populate properties: predicted_class, class_prob and ensemble_probs.
-
-        Parameters
-        ----------
-        method: str
-            Chosen classifier.
-            The current implementation accepts `RandomForest`,
-            'GradientBoostedTrees', 'KNN', 'MLP', 'SVM' and 'NB'.
-        save_predictions: bool (optional)
-            Save predictions to file. Default is False.
-        pred_dir: str (optional)
-            Output directory to store class predictions.
-            Only used if `save_predictions == True`. Default is None.
-        loop: int (optional)
-            Corresponding loop. Default is None.
-        kwargs: extra parameters
-            Parameters required by the chosen classifier.
-        """
-        n_ensembles = 10
         
-        if method == 'RandomForest' and str(self.validation_features) != 'None':
-            self.predicted_class, self.class_prob, self.ensemble_probs = \
-                bootstrap_clf(random_forest, n_ensembles,
+        # train model and classify pool sample
+        self.pool_class,  self.pool_prob, self.classifier = \
+               random_forest(classifier=method, self.train_features, 
+                             self.train_labels, self.pool_features, **kwargs)
+
+        if classify_bootstrap:
+           self.pool_class, self.pool_prob, self.ensemble_probs = \
+                bootstrap_clf(self.classifier, n_ensembles,
                               self.train_features, self.train_labels,
-                              self.validation_features, **kwargs)
+                              self.pool_features, **kwargs)
+        
+        # classify validation sample
+        self.validation_class = \
+            self.classifier.predict(self.validation_features)
+        self.validation_prob = \
+            self.classifer.predict_proba(self.validation_features)
 
-        elif method == 'RandomForest':
-            self.predicted_class, self.class_prob, self.ensemble_probs = \
-            bootstrap_clf(random_forest, n_ensembles,
-                          self.train_features, self.train_labels,
-                          self.test_features, **kwargs)
+        if save_predictions:
+            # identify id keyword
+            id_name = self.identify_keywords()
 
-        elif method == 'GradientBoostedTrees':
-            self.predicted_class, self.class_prob, self.ensemble_probs = \
-            bootstrap_clf(gradient_boosted_trees, n_ensembles,
-                          self.train_features, self.train_labels,
-                          self.test_features, **kwargs)
-        elif method == 'KNN':
-            self.predicted_class, self.class_prob, self.ensemble_probs = \
-            bootstrap_clf(knn, n_ensembles,
-                          self.train_features, self.train_labels,
-                          self.test_features, **kwargs)
-        elif method == 'MLP':
-            self.predicted_class, self.class_prob, self.ensemble_probs = \
-            bootstrap_clf(mlp, n_ensembles,
-                          self.train_features, self.train_labels,
-                          self.test_features, **kwargs)
-        elif method == 'SVM':
-            self.predicted_class, self.class_prob, self.ensemble_probs = \
-            bootstrap_clf(svm, n_ensembles,
-                          self.train_features, self.train_labels,
-                          self.test_features, **kwargs)
-        elif method == 'NB':
-            self.predicted_class, self.class_prob, self.ensemble_probs = \
-            bootstrap_clf(nbg, n_ensembles,
-                          self.train_features, self.train_labels,
-                          self.test_features, **kwargs)
+            out_fname = 'predict_loop_' + str(loop) + '_pool.dat'
+            op = open(pred_dir + '/' + out_fname, 'w')
+            op.write(id_name + ',' + 'prob_nIa, prob_Ia,pred_class\n')
+            for i in range(self.pool_metadata.shape[0]):
+                op.write(str(self.pool_metadata[id_name].iloc[i]) + ',')
+                op.write(str(self.pool_prob[i][0]) + ',' + str(self.pool_prob[i][1]) + ',')
+                op.write(str(self.pool_class[i]) + '\n')
+            op.close()
 
+        # get classification results from test sample
+        if get_results_test:
+            self.test_class = self.classifier.predict(self.test_features)
+            self.test_prob = self.classifer.predict_proba(self.test_features)
 
-        else:
-            raise ValueError("The only classifiers implemented are" +
-                              "'RandomForest', 'GradientBoostedTrees'," +
-                              "'KNN', 'MLP' and NB'." +
-                             "\n Feel free to add other options.")
+            if save_predictions:
+                # identify id keyword
+                id_name = self.identify_keywords()
+
+                out_fname = 'predict_loop_' + str(loop) + '_test.dat'
+                op = open(pred_dir + '/' + out_fname, 'w')
+                op.write(id_name + ',' + 'prob_nIa, prob_Ia,pred_class\n')
+                for i in range(self.test_metadata.shape[0]):
+                    op.write(str(self.test_metadata[id_name].iloc[i]) + ',')
+                    op.write(str(self.test_prob[i][0]) + ',' + \
+                             str(self.test_prob[i][1]) + ',')
+                    op.write(str(self.test_class[i]) + '\n')
+                 op.close()
 
     def output_photo_Ia(self, threshold: float, to_file=True, 
-                        filename=' '):
+                        filename=' ', sample='pool'):
         """Returns the metadata for  photometrically classified SN Ia.
 
         Parameters
@@ -1096,6 +1020,9 @@ class DataBase:
             write to file. Default is False.
         filename: str (optional)
             Name of output file. Only used if to_file is True.
+        sample: str (optional)
+            Sample to be classified. Options are 'validation' or 'test'.
+            Default is pool. 
 
         Returns
         -------
@@ -1103,25 +1030,32 @@ class DataBase:
             if to_file is False, otherwise write DataFrame to file.
         """
 
-        # photo Ia flag
-        photo_flag = self.classprob[:,1] >= threshold
+        # get id keyword
+        id_name = self.identify_keywords
 
-        if 'objid' in self.test_metadata.keys():
-            id_name = 'objid'
-        elif 'id' in self.test_metadata.keys():
-            id_name = 'id'
+        if sample == 'validation':
+            # photo Ia flag
+            photo_flag = self.validation_prob[:,1] >= threshold
 
-        # get ids
-        photo_Ia_metadata = self.test_metadata[photo_flag]
-        
+            # get ids
+            self.photo_Ia_metadata = \
+                self.validation_metadata[photo_flag][id_name].values
+
+        elif sample == 'test':
+            photo_flag = self.test_prob[:,1] >= threshold
+            self.photo_Ia_metadata = \
+                self.test_metadata[photo_flag][id_name].values
+
+        else:
+            raise ValueError('Parameter "sample" can only be "test" or ' + \
+                             'validation.')
 
         if to_file:
-            photo_Ia_metadata.to_csv(filename, index=False)
-        else:
-            self.photo_Ia_metadata = photo_Ia_metadata     
+            self.photo_Ia_metadata.to_csv(filename, index=False)
+                 
 
     def evaluate_classification(self, metric_label='snpcc', 
-                                sep_validation=False):
+                                sample='validation'):
         """Evaluate results from classification.
 
         Populate properties: metric_list_names and metrics_list_values.
@@ -1130,18 +1064,19 @@ class DataBase:
         ----------
         metric_label: str
             Choice of metric. Currenlty only `snpcc` is accepted.
-        sep_validation: bool (optional)
-            If True, construt separated validation sample. Default is False.
+        sample: str (optional)
+            Sample to be evaluated. Options are 'validation' or 
+            'test'. Default is 'validation'.
         """
 
-        if metric_label == 'snpcc' and sep_validation:
+        if metric_label == 'snpcc' and sample == 'validation':
             self.metrics_list_names, self.metrics_list_values = \
-                get_snpcc_metric(list(self.val_pred),
+                get_snpcc_metric(list(self.validation_class),
                                  list(self.validation_labels))
 
-        elif metric_label == 'snpcc' and not sep_validation:
+        elif metric_label == 'snpcc' and sample == 'test':
             self.metrics_list_names, self.metrics_list_values = \
-                get_snpcc_metric(list(self.predicted_class),
+                get_snpcc_metric(list(self.test_class),
                                  list(self.test_labels))
         else:
             raise ValueError('Only snpcc metric is implemented!'
@@ -1182,56 +1117,54 @@ class DataBase:
             If strategy=='RandomSampling' the order is irrelevant.
         """
 
-        if 'objid' in self.test_metadata.keys():
-            id_name = 'objid'
-        elif 'id' in self.test_metadata.keys():
-            id_name = 'id'
+        # identify id keyworkd
+        id_name = self.identify_keyword()
    
         if strategy == 'UncSampling':
-            query_indx = uncertainty_sampling(class_prob=self.classprob,
+            query_indx = uncertainty_sampling(class_prob=self.pool_prob,
                                               queryable_ids=self.queryable_ids,
-                                              test_ids=self.test_metadata[id_name].values,
+                                              test_ids=self.pool_metadata[id_name].values,
                                               batch=batch, screen=screen,
                                               query_thre=query_thre)
             return query_indx
         elif strategy == 'UncSamplingEntropy':
-            query_indx = uncertainty_sampling_entropy(class_prob=self.classprob,
+            query_indx = uncertainty_sampling_entropy(class_prob=self.pool_prob,
                                               queryable_ids=self.queryable_ids,
-                                              test_ids=self.test_metadata[id_name].values,
+                                              test_ids=self.pool_metadata[id_name].values,
                                               batch=batch, screen=screen,
                                               query_thre=query_thre)
             return query_indx
         elif strategy == 'UncSamplingLeastConfident':
-            query_indx = uncertainty_sampling_least_confident(class_prob=self.classprob,
+            query_indx = uncertainty_sampling_least_confident(class_prob=self.pool_prob,
                                               queryable_ids=self.queryable_ids,
-                                              test_ids=self.test_metadata[id_name].values,
+                                              test_ids=self.pool_metadata[id_name].values,
                                               batch=batch, screen=screen,
                                               query_thre=query_thre)
             return query_indx
         elif strategy == 'UncSamplingMargin':
-            query_indx = uncertainty_sampling_margin(class_prob=self.classprob,
+            query_indx = uncertainty_sampling_margin(class_prob=self.pool_prob,
                                               queryable_ids=self.queryable_ids,
-                                              test_ids=self.test_metadata[id_name].values,
+                                              test_ids=self.pool_metadata[id_name].values,
                                               batch=batch, screen=screen,
                                               query_thre=query_thre)
             return query_indx
         elif strategy == 'QBDMI':
             query_indx = qbd_mi(ensemble_probs=self.ensemble_probs,
                                 queryable_ids=self.queryable_ids,
-                                test_ids=self.test_metadata[id_name].values,
+                                test_ids=self.pool_metadata[id_name].values,
                                 batch=batch, screen=screen,
                                 query_thre=query_thre)
             return query_indx
         elif strategy =='QBDEntropy':
             query_indx = qbd_entropy(ensemble_probs=self.ensemble_probs,
                                     queryable_ids=self.queryable_ids,
-                                    test_ids=self.test_metadata[id_name].values,
+                                    test_ids=self.pool_metadata[id_name].values,
                                     batch=batch, screen=screen,
                                     query_thre=query_thre)
             return query_indx
         elif strategy == 'RandomSampling':
             query_indx = random_sampling(queryable_ids=self.queryable_ids,
-                                         test_ids=self.test_metadata[id_name].values,
+                                         test_ids=self.pool_metadata[id_name].values,
                                          queryable=queryable, batch=batch,
                                          query_thre=query_thre)
 
@@ -1262,18 +1195,14 @@ class DataBase:
             Default is False.
         """
 
-        if 'id' in self.train_metadata.keys():
-            id_name = 'id'
-        elif 'objid' in self.train_metadata.keys():
-            id_name = 'objid'
+        # get id keyword
+        id_name = self.identify_keyword()
 
+        # store all queries
         all_queries = []
 
-
-        if sep_val_pool:
-            size = self.pool_metadata.shape[0]
-        else:
-            size = self.test_metadata.shape[0]
+        # get size of pool sample
+        size = self.pool_metadata.shape[0]
 
         while len(query_indx) > 0 and size > 0:
 
@@ -1281,8 +1210,8 @@ class DataBase:
             obj = query_indx[0]
 
             # add object to the query sample
-            query_header = self.test_metadata.values[obj]
-            query_features = self.test_features[obj]
+            query_header = self.pool_metadata.values[obj]
+            query_features = self.pool_features[obj]
             line = [epoch]
             for item in query_header:
                 line.append(item)
@@ -1301,12 +1230,21 @@ class DataBase:
                                           axis=0)
 
             # remove queried object from test sample
-            query_flag = self.test_metadata[id_name].values == self.test_metadata[id_name].iloc[obj]
-            test_metadata_temp = self.test_metadata.copy()
-            self.test_metadata = test_metadata_temp[~query_flag]
-            self.test_labels = np.delete(self.test_labels, obj, axis=0)
-            self.test_features = np.delete(self.test_features, obj, axis=0)
-            all_queries.append(line)
+            if sep_pool_val:
+                query_flag = self.pool_metadata[id_name].values == self.pool_metadata[id_name].iloc[obj]
+                pool_metadata_temp = self.pool_metadata.copy()
+                self.pool_metadata = pool_metadata_temp[~query_flag]
+                self.pool_labels = np.delete(self.pool_labels, obj, axis=0)
+                self.pool_features = np.delete(self.pool_features, obj, axis=0)
+                all_queries.append(line)
+
+            else:
+                query_flag = self.test_metadata[id_name].values == self.test_metadata[id_name].iloc[obj]
+                test_metadata_temp = self.test_metadata.copy()
+                self.test_metadata = test_metadata_temp[~query_flag]
+                self.test_labels = np.delete(self.test_labels, obj, axis=0)
+                self.test_features = np.delete(self.test_features, obj, axis=0)
+                all_queries.append(line)
 
             # update ids order
             query_indx.remove(obj)
