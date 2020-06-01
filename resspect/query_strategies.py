@@ -41,7 +41,7 @@ def compute_entropy(ps: np.array):
     entropy: np.array
         Predicted classes.
     """
-    return -1*np.sum(ps*np.log(ps + 1e-12), axis=-1)
+    return -1 * np.sum(ps * np.log(ps + 1e-12), axis=-1)
 
 
 def compute_qbd_mi_entropy(ensemble_probs: np.array):
@@ -108,26 +108,21 @@ def uncertainty_sampling(class_prob: np.array, test_ids: np.array,
         raise ValueError('Number of probabiblities is different ' +
                          'from number of objects in the test sample!')
 
-    # calculate distance to the decision boundary - only binary classification
+    # calculate distance to the decision boundary
+    # only binary classification
     dist = abs(class_prob[:, 1] - 0.5)
 
     # get indexes in increasing order
     order = dist.argsort()
 
     # only allow objects in the query sample to be chosen
-    flag = []
-    for item in order:
-        if test_ids[item] in queryable_ids:
-            flag.append(True)
-        else:
-            flag.append(False)
+    flag = np.array([test_ids[item] in queryable_ids for item in order])
 
     # check if there are queryable objects within threshold
     indx = int(len(flag) * query_thre)
     if sum(flag[:indx]) > 0:
 
         # arrange queryable elements in increasing order
-        flag = np.array(flag)
         final_order = order[flag]
 
         if screen:
@@ -142,13 +137,13 @@ def uncertainty_sampling(class_prob: np.array, test_ids: np.array,
         return list([])
 
 
-def random_sampling(test_ids: np.array, queryable_ids: np.array,
-                    batch=1, queryable=False, query_thre=1.0, seed=42) -> list:
+def random_sampling(pool_ids: np.array, queryable_ids: np.array,
+                    batch=1, queryable=False, seed=42) -> list:
     """Randomly choose an object from the test sample.
 
     Parameters
     ----------
-    test_ids: np.array
+    pool_ids: np.array
         Set of ids for objects in the test sample.
     queryable_ids: np.array
         Set of ids for objects available for querying.
@@ -158,9 +153,6 @@ def random_sampling(test_ids: np.array, queryable_ids: np.array,
     queryable: bool (optional)
         If True, check if randomly chosen object is queryable.
         Default is False.
-    query_thre: float (optinal)
-        Threshold where a query is considered worth it.
-        Default is 1.0 (no limit).
     seed: int (optional)
         Seed for random number generator. Default is 42.
 
@@ -175,29 +167,19 @@ def random_sampling(test_ids: np.array, queryable_ids: np.array,
 
     # randomly select indexes to be queried
     np.random.seed(seed)
-    indx = np.random.randint(low=0, high=len(test_ids), size=len(test_ids))
+    indx = np.random.choice(np.arange(0, len(pool_ids)),
+                            size=len(pool_ids), replace=False)
 
     if queryable:
         # flag only the queryable objects
-        flag = []
-        for item in indx:
-            if test_ids[item] in queryable_ids:
-                flag.append(True)
-            else:
-                flag.append(False)
+        flag = np.array([pool_ids[item] in queryable_ids for item in indx])
 
-        flag = np.array(flag)
-
-        # check if there are queryable objects within threshold
-        indx_query = int(len(flag) * query_thre)
-
-        if sum(flag[:indx_query]) > 0:
+        if sum(flag) > 0:
             # return the corresponding batch size
             return list(indx[flag])[:batch]
         else:
             # return empty list
             return list([])
-
     else:
         return list(indx)[:batch]
 

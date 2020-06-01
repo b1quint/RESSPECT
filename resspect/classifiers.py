@@ -115,9 +115,9 @@ def sklearn_classifiers(classifier: str,
         clf = XGBClassifier(**kwargs)
     elif classifier == 'KNearestNeighbor':
         clf = KNeighborsClassifier(**kwargs)
-    elif classifier = 'MultiLayerPerceptron':
+    elif classifier == 'MultiLayerPerceptron':
         clf = MLPClassifier(**kwargs)
-    elif classifier = 'SupportVectorMachine':
+    elif classifier == 'SupportVectorMachine':
         clf = SVC(probability=True, **kwargs)
     elif classifier == 'NaiveBayes':
         clf=GaussianNB(**kwargs)

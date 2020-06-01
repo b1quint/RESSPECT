@@ -31,7 +31,7 @@ def time_domain_loop(days: list,  output_metrics_file: str,
                      path_to_full_lc_features="", path_to_train="",
                      path_to_queried="", queryable=True,
                      query_thre=1.0, save_samples=False, sep_files=False,
-                     screen=True, survey='LSST', initial_training='original'):
+                     screen=True, survey='DES', initial_training='original'):
     """Perform the active learning loop. All results are saved to file.
 
     Parameters
@@ -101,7 +101,7 @@ def time_domain_loop(days: list,  output_metrics_file: str,
         from independent files. Default is False.
     survey: str (optional)
         Name of survey to be analyzed. Accepts 'DES' or 'LSST'.
-        Default is LSST.
+        Default is DES.
     initial_training: str or int (optional)
         Choice of initial training sample.
         If 'original': begin from the train sample flagged in the file
@@ -120,13 +120,21 @@ def time_domain_loop(days: list,  output_metrics_file: str,
     # load features for the first day
     path_to_features = path_to_features_dir + fname_pattern[0]  + \
                        str(int(days[0])) + fname_pattern[1]
-    data.load_features(path_to_features, method=features_method,
+    
+    if initial_training == 'original':
+        queryable_ini = False
+        ini_train = path_to_full_lc_features
+    else:
+        queryable_ini = queryable
+        ini_train = path_to_features
+        
+    data.load_features(ini_train, method=features_method,
                        screen=screen, survey=survey)
-
-    # constructs training, test and queryable
+    
+    # constructs training, test, pool and validation samples
     data.build_samples(initial_training=initial_training, nclass=nclass,
                       screen=screen, Ia_frac=Ia_frac,
-                      queryable=queryable, save_samples=save_samples, 
+                      queryable=queryable_ini, save_samples=save_samples, 
                       sep_files=sep_files, survey=survey, 
                       output_fname=output_fname, path_to_train=path_to_train,
                       path_to_queried=path_to_queried, method=features_method)
@@ -136,7 +144,7 @@ def time_domain_loop(days: list,  output_metrics_file: str,
         canonical = DataBase()
         canonical.load_features(path_to_file=path_to_canonical)
         data.queryable_ids = canonical.queryable_ids
-
+ 
     for night in range(int(days[0]), int(days[-1]) - 1):
 
         if screen:
@@ -148,25 +156,26 @@ def time_domain_loop(days: list,  output_metrics_file: str,
         else:
             loop = night - int(days[0])
 
-        if data.test_metadata.shape[0] > 0:
+        if data.pool_metadata.shape[0] > 0:
             # classify
             data.classify(method=classifier)
 
             # calculate metrics
             data.evaluate_classification()
         
-            indx = data.make_query(strategy=strategy, batch=batch, queryable=queryable,
+            indx = data.make_query(strategy=strategy, batch=batch, 
+                                   queryable=queryable, screen=screen,
                                    query_thre=query_thre)
 
-        # update training and test samples
-        data.update_samples(indx, loop=loop)
+            # update training and test samples
+            data.update_samples(indx, loop=loop)
 
-        # save metrics for current state
-        data.save_metrics(loop=loop, output_metrics_file=output_metrics_file,
-                          batch=batch, epoch=night)
+            # save metrics for current state
+            data.save_metrics(loop=loop, output_metrics_file=output_metrics_file,
+                               batch=batch, epoch=night)
 
-        # save query sample to file
-        data.save_queried_sample(output_queried_file, loop=loop,
+            # save query sample to file
+            data.save_queried_sample(output_queried_file, loop=loop,
                                      full_sample=False)
 
         # load features for next day
@@ -182,30 +191,31 @@ def time_domain_loop(days: list,  output_metrics_file: str,
                               for item in data_tomorrow.metadata['id'].values])
    
         # use new data  
-        data.train_metadata = data_tomorrow.metadata[train_flag]
-        data.train_features = data_tomorrow.features.values[train_flag]
-        data.test_metadata = data_tomorrow.metadata[~train_flag]
-        data.test_features = data_tomorrow.features.values[~train_flag]
+        #data.train_metadata = data_tomorrow.metadata[train_flag]
+        #data.train_features = data_tomorrow.features.values[train_flag]
+        data.pool_metadata = data_tomorrow.metadata[~train_flag]
+        data.pool_features = data_tomorrow.features.values[~train_flag]
+        data.metadata_names = data_tomorrow.metadata_names
 
         # new labels
-        data.train_labels = np.array([int(item  == 'Ia') for item in 
-                                     data.train_metadata['type'].values])
-        data.test_labels = np.array([int(item == 'Ia') for item in 
-                                    data.test_metadata['type'].values])
+        #data.train_labels = np.array([int(item  == 'Ia') for item in 
+        #                             data.train_metadata['type'].values])
+        data.pool_labels = np.array([int(item == 'Ia') for item in 
+                                    data.pool_metadata['type'].values])
 
         if strategy == 'canonical':
             data.queryable_ids = canonical.queryable_ids
 
         if  queryable:
             queryable_flag = data_tomorrow.metadata['queryable'].values
-            queryable_test_flag = np.logical_and(~train_flag, queryable_flag)
-            data.queryable_ids = data_tomorrow.metadata['id'].values[queryable_test_flag]
+            queryable_pool_flag = np.logical_and(~train_flag, queryable_flag)
+            data.queryable_ids = data_tomorrow.metadata['id'].values[queryable_pool_flag]
         else:
             data.queryable_ids = data_tomorrow.metadata['id'].values[~train_flag]
 
         if screen:
             print('Training set size: ', data.train_metadata.shape[0])
-            print('Test set size: ', data.test_metadata.shape[0])
+            print('Pool set size: ', data.pool_metadata.shape[0])
             print('Queryable set size: ', len(data.queryable_ids))
 
 

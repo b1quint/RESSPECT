@@ -27,7 +27,7 @@ Notice that this data has some pre-determine separation between training and tes
 .. code-block:: python
    :linenos:
 
-   >>> data.metadata['sample'].unique()
+   >>> data.metadata['orig_sample'].unique()
    array(['test', 'train'], dtype=object)
 
 You can choose to start your first iteration of the active learning loop from the original training sample
@@ -42,7 +42,7 @@ training sample. The code below build the respective samples and performs the cl
    Test set size:  20191
 
    >>> data.classify(method='RandomForest')
-   >>> data.classprob                        # check classification probabilities
+   >>> data.pool_prob                        # check classification probabilities
    array([[0.461, 0.539],
           [0.346, 0.654],
           ...,
