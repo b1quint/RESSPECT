@@ -102,14 +102,14 @@ class ExpTimeCalc(object):
         self.diameter = 4.0             # in meters  (DEcam default)
         self.gain = 4.0                 # DECam typical gain
         self.hPlanck_MKS = 6.62606957e-34 
-        self.magsarray = np.linspace(15., 27., 100000)
+        self.magsarray = np.linspace(15., 30., 1000000)
         self.num_atm_eff = np.array([0.7,0.8,0.9,0.9,0.9,0.95])
         self.pixelsize = 0.264          # arcsec/pix (DECam default)
         self.prim_refl_filt = np.asarray([0.89,0.89,0.88,0.87,0.88,0.9])
         self.RON_pix = 7.0
         self.seeing = {}                # store all seeing values
         self.seeing['r'] = 0.75         # median value at CTIO
-        self.texparray = np.linspace(60., 7200., 100000)  # 60s - 2h
+        self.texparray = np.linspace(60., 18000., 1000000)  # 60s - 5h
         self.vig = 1.0
         self.u = 375                    # DECam defaults
         self.g = 473.5 
@@ -363,7 +363,10 @@ class ExpTimeCalc(object):
             raise ValueError("Ivalid skymode value: options are 'mag'," + \
                              "'mag-FWHM', 'ADU' and 'ADU-FWHM'.")
     
-        return magsarray[np.argmin((SNRs - SNRin)**2)]
+        argm = np.argmin((SNRs - SNRin)**2)
+        if (argm == 0) or (argm == len(self.magsarray)-1):
+            raise ValueError("Reached limit of magsarray!")  
+        return self.magsarray[argm]
 
     def findexptime(self, mag: float, SNRin:float, cwl_nm=500,
                     bandpass_nm=1.0, band='r', airmass=1.25, skymode='ADU',
@@ -433,7 +436,10 @@ class ExpTimeCalc(object):
             raise ValueError('Invalid "skymode" value. Possible options ' + \
                              'are: "mag", "mag-FWHM", "ADU" and "ADU-FWHM".')
 
-        est_exptime = self.texparray[np.argmin((SNRs - SNRin)**2)]
+        argm = np.argmin((SNRs - SNRin)**2)
+        if (argm == 0) or (argm == len(self.texparray)-1):
+            raise ValueError("Reached limit of texparray!")    
+        est_exptime = self.texparray[argm]
 
         return est_exptime
 
